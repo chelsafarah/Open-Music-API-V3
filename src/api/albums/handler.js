@@ -66,6 +66,31 @@ class AlbumsHandler {
       message: 'Album berhasil dihapus',
     };
   }
+
+  async postLikeAlbumHandler(request, h) {
+    const { id } = request.params;
+    const { id: credentialId } = request.auth.credentials;
+
+    await this._service.getAlbumById(id);
+    const message = await this._service.postLikeAlbum(id, credentialId);
+    const response = h.response({
+      status: 'success',
+      message,
+    });
+    response.code(201);
+    return response;
+  }
+
+  async getAlbumLikesHandler(request) {
+    const { id } = request.params;
+    const likes = await this._service.getAlbumLikes(id);
+    return {
+      status: 'success',
+      data: {
+        likes,
+      },
+    };
+  }
 }
 
 module.exports = AlbumsHandler;
