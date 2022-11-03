@@ -5,9 +5,10 @@ const NotFoundError = require('../../exceptions/NotFoundError');
 const { mapDBToModel } = require('../../utils/albums');
 
 class AlbumsService {
-  constructor(songsService) {
+  constructor(songsService, cacheService) {
     this._pool = new Pool();
     this._songsService = songsService;
+    this._cacheService = cacheService;
   }
 
   async addAlbum({ name, year }) {
@@ -116,22 +117,38 @@ class AlbumsService {
       }
       message = 'Album berhasil batal disukai';
     }
+    await this._cacheService.delete(`albumLikes:${albumId}`);
 
     return message;
   }
 
   async getAlbumLikes(albumId) {
-    const query = {
-      text: 'SELECT COUNT(*) FROM user_album_likes WHERE album_id = $1',
-      values: [albumId],
-    };
-    const result = await this._pool.query(query);
+    try {
+      // mendapatkan catatan dari cache
+      const result = await this._cacheService.get(`albumLikes:${albumId}`);
 
-    if (!result.rows.length) {
-      throw new NotFoundError('Album tidak ditemukan');
+      const album = {};
+      album.like = JSON.parse(result);
+      album.cache = true;
+
+      return album;
+    } catch (error) {
+      const query = {
+        text: 'SELECT COUNT(*) FROM user_album_likes WHERE album_id = $1',
+        values: [albumId],
+      };
+      const result = await this._pool.query(query);
+
+      if (!result.rows.length) {
+        throw new NotFoundError('Album tidak ditemukan');
+      }
+      const count = parseInt(result.rows[0].count, 10);
+
+      // catatan akan disimpan pada cache sebelum fungsi getNotes dikembalikan
+      await this._cacheService.set(`albumLikes:${albumId}`, JSON.stringify(count));
+
+      return count;
     }
-    const count = parseInt(result.rows[0].count, 10);
-    return count;
   }
 }
 
