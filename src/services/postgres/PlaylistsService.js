@@ -5,10 +5,11 @@ const NotFoundError = require('../../exceptions/NotFoundError');
 const AuthorizationError = require('../../exceptions/AuthorizationError');
 
 class PlaylistsService {
-  constructor(songsService, collaborationService) {
+  constructor(songsService, collaborationService, cacheService) {
     this._pool = new Pool();
     this._songsService = songsService;
     this._collaborationService = collaborationService;
+    this._cacheService = cacheService;
   }
 
   async addPlaylist({ name, owner }) {
@@ -24,23 +25,31 @@ class PlaylistsService {
       throw new InvariantError('Playlist gagal ditambahkan');
     }
 
+    await this._cacheService.delete(`playlists:${owner}`);
     return result.rows[0].id;
   }
 
   async getPlaylists(owner) {
-    const query = {
-      text: `SELECT playlists.id, playlists.name, users.username
+    try {
+      // mendapatkan catatan dari cache
+      const result = await this._cacheService.get(`playlists:${owner}`);
+      return JSON.parse(result);
+    } catch (error) {
+      const query = {
+        text: `SELECT playlists.id, playlists.name, users.username
       FROM playlists
       LEFT JOIN users ON users.id = playlists.owner
       LEFT JOIN collaborations ON collaborations.playlist_id = playlists.id
       WHERE owner = $1 OR collaborations.user_id = $1
       GROUP BY playlists.id, users.username`,
-      values: [owner],
-    };
+        values: [owner],
+      };
 
-    const result = await this._pool.query(query);
+      const result = await this._pool.query(query);
 
-    return result.rows;
+      await this._cacheService.set(`playlists:${owner}`, JSON.stringify(result.rows));
+      return result.rows;
+    }
   }
 
   async getPlaylistsbyId(playlistId) {
@@ -72,6 +81,9 @@ class PlaylistsService {
     if (!result.rows.length) {
       throw new NotFoundError('Playlist gagal dihapus. Id tidak ditemukan');
     }
+
+    const { owner } = result.rows[0];
+    await this._cacheService.delete(`playlists:${owner}`);
   }
 
   async addPlaylistSong(playlistId, { songId }) {
@@ -145,8 +157,8 @@ class PlaylistsService {
     if (!result.rows.length) {
       throw new NotFoundError('Playlist tidak ditemukan');
     }
-    const note = result.rows[0];
-    if (note.owner !== owner) {
+    const playlist = result.rows[0];
+    if (playlist.owner !== owner) {
       throw new AuthorizationError('Anda tidak berhak mengakses resource ini');
     }
   }
